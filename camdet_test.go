@@ -1,6 +1,7 @@
 package camdet
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,6 +77,16 @@ func (f *fixture) addProcessUsing(pid int, comm, devNode string) {
 	if err := os.Symlink(devNode, filepath.Join(fdDir, "3")); err != nil {
 		f.t.Fatalf("symlinking fd: %v", err)
 	}
+}
+
+// addStreamingProcess creates a /proc/<pid> entry that both holds devNode open
+// and has it memory-mapped, simulating an active V4L2 capture (which mmaps its
+// buffers from the device fd).
+func (f *fixture) addStreamingProcess(pid int, comm, devNode string) {
+	f.t.Helper()
+	f.addProcessUsing(pid, comm, devNode)
+	line := fmt.Sprintf("7f0000000000-7f0000001000 rw-s 00000000 00:06 1145 %s\n", devNode)
+	mustWrite(f.t, filepath.Join(f.root, "proc", strconv.Itoa(pid), "maps"), line)
 }
 
 // addUnreadableProcess creates a /proc/<pid>/fd directory that cannot be read,
@@ -260,3 +271,56 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 }
 
+// A camera is Streaming only when a process has a node memory-mapped (active
+// capture). A process that merely holds the fd open (a probe) is InUse but not
+// Streaming — this is the distinction that keeps browser device-enumeration from
+// counting as "in use".
+func TestStreamingVsOpen(t *testing.T) {
+	f := newFixture(t)
+	f.addUSBCamera("1-2", "046d", "082d", "Brio", "", "video0")
+	f.addStreamingProcess(4321, "ffmpeg", "/dev/video0") // fd + mmap = streaming
+	f.addProcessUsing(9876, "chrome", "/dev/video0")     // fd only = probe
+
+	res, err := detect(f.root)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if len(res.Cameras) != 1 {
+		t.Fatalf("want 1 camera, got %d", len(res.Cameras))
+	}
+	cam := res.Cameras[0]
+	if !cam.InUse {
+		t.Fatal("camera should be InUse (fds are open)")
+	}
+	if !cam.Streaming {
+		t.Fatal("camera should be Streaming (ffmpeg has it mmap'd)")
+	}
+	streamingByName := map[string]bool{}
+	for _, u := range cam.Users {
+		streamingByName[u.Name] = u.Streaming
+	}
+	if !streamingByName["ffmpeg"] {
+		t.Fatal("ffmpeg should be marked streaming")
+	}
+	if streamingByName["chrome"] {
+		t.Fatal("chrome (probe, no mmap) must not be marked streaming")
+	}
+}
+
+func TestOpenOnlyIsNotStreaming(t *testing.T) {
+	f := newFixture(t)
+	f.addUSBCamera("1-2", "046d", "082d", "Brio", "", "video0")
+	f.addProcessUsing(5555, "chrome", "/dev/video0") // only opens, never mmaps
+
+	res, err := detect(f.root)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	cam := res.Cameras[0]
+	if !cam.InUse {
+		t.Fatal("open fd should count as InUse")
+	}
+	if cam.Streaming {
+		t.Fatal("an open-only camera must not be Streaming")
+	}
+}

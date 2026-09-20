@@ -2,9 +2,12 @@
 // Linux system. It prints a human-readable table by default, or JSON with
 // --json, and sets its exit code so it can be used in shell scripts:
 //
-//	0  no camera in use
-//	1  at least one camera in use
+//	0  no camera streaming and no mic in use
+//	1  a camera is actively streaming, or a mic is in use
 //	2  error
+//
+// A camera that is merely open (e.g. an app probing device capabilities) is
+// reported in the table but is not "streaming" and does not set exit code 1.
 package main
 
 import (
@@ -76,24 +79,28 @@ func emitTable(result *camdet.MicResult) {
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "DEVICE\tTYPE\tNODES\tIN USE\tUSED BY")
-	
-	// Emit cameras
+	fmt.Fprintln(writer, "DEVICE\tTYPE\tNODES\tOPEN\tSTREAMING\tUSED BY")
+
+	// Emit cameras: OPEN means a process holds a node; STREAMING means one is
+	// actively capturing (device mmap'd). A probe shows OPEN=yes, STREAMING=no.
 	for _, cam := range result.Cameras {
-		fmt.Fprintf(writer, "%s\tcamera\t%s\t%s\t%s\n",
+		fmt.Fprintf(writer, "%s\tcamera\t%s\t%s\t%s\t%s\n",
 			orDash(cam.Name),
 			strings.Join(cam.Nodes, ","),
 			yesNo(cam.InUse),
+			yesNo(cam.Streaming),
 			formatUsers(cam.Users),
 		)
 	}
-	
-	// Emit microphones
+
+	// Emit microphones. A mic's "in use" already means an active capture stream
+	// (from /proc/asound status), so it has no separate open-vs-streaming state.
 	for _, mic := range result.Mics {
-		fmt.Fprintf(writer, "%s\tmic\t%s\t%s\t%s\n",
+		fmt.Fprintf(writer, "%s\tmic\t%s\t%s\t%s\t%s\n",
 			orDash(mic.Name),
 			mic.Device,
 			yesNo(mic.InUse),
+			"-",
 			formatMicUsers(mic.Users),
 		)
 	}
@@ -102,7 +109,7 @@ func emitTable(result *camdet.MicResult) {
 
 func exitCode(result *camdet.MicResult) int {
 	for _, cam := range result.Cameras {
-		if cam.InUse {
+		if cam.Streaming {
 			return exitInUse
 		}
 	}

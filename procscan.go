@@ -1,6 +1,7 @@
 package camdet
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,7 +45,8 @@ func scanOpen(root string, nodeSet map[string]bool) (map[string][]Process, bool,
 			continue
 		}
 
-		comm := readComm(procDir, entry.Name())
+		// Collect the camera nodes this process holds open.
+		var openNodes []string
 		for _, fd := range fds {
 			target, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
 			if err != nil {
@@ -52,16 +54,55 @@ func scanOpen(root string, nodeSet map[string]bool) (map[string][]Process, bool,
 				continue
 			}
 			if nodeSet[target] {
-				openByNode[target] = append(openByNode[target], Process{
-					PID:  pid,
-					Name: comm,
-					Node: target,
-				})
+				openNodes = append(openNodes, target)
 			}
+		}
+		if len(openNodes) == 0 {
+			continue
+		}
+
+		comm := readComm(procDir, entry.Name())
+		streaming := mappedNodes(procDir, entry.Name(), nodeSet)
+		for _, node := range openNodes {
+			openByNode[node] = append(openByNode[node], Process{
+				PID:       pid,
+				Name:      comm,
+				Node:      node,
+				Streaming: streaming[node],
+			})
 		}
 	}
 
 	return openByNode, fullVisibility, nil
+}
+
+// mappedNodes reads /proc/<pid>/maps and returns the set of tracked camera
+// nodes the process has memory-mapped. A V4L2 capture mmaps its buffers from
+// the device fd (after VIDIOC_REQBUFS), so an actively streaming process has the
+// node mapped here; merely opening the device or probing its capabilities does
+// not map anything. Unreadable maps (permissions, process exit) yield an empty
+// set, i.e. "not streaming", degrading gracefully like the fd scan.
+func mappedNodes(procDir, pid string, nodeSet map[string]bool) map[string]bool {
+	mapped := make(map[string]bool)
+	f, err := os.Open(filepath.Join(procDir, pid, "maps"))
+	if err != nil {
+		return mapped
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		// Each line is: address perms offset dev inode pathname
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 6 {
+			continue
+		}
+		if path := fields[len(fields)-1]; nodeSet[path] {
+			mapped[path] = true
+		}
+	}
+	return mapped
 }
 
 // readComm reads /proc/<pid>/comm, returning the process name without its

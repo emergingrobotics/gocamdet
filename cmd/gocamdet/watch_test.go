@@ -38,7 +38,8 @@ func inUseResult() *camdet.MicResult {
 				ProductID: "082d",
 				Nodes:     []string{"/dev/video0"},
 				InUse:     true,
-				Users:     []camdet.Process{{PID: 1234, Name: "zoom", Node: "/dev/video0"}},
+				Streaming: true,
+				Users:     []camdet.Process{{PID: 1234, Name: "zoom", Node: "/dev/video0", Streaming: true}},
 			}},
 			FullVisibility: true,
 		},
@@ -83,10 +84,10 @@ func TestGetEventInfo(t *testing.T) {
 
 func TestEventFor(t *testing.T) {
 	tests := []struct {
-		name       string
-		prev       eventInfo
-		curr       eventInfo
-		wantEvent  string
+		name      string
+		prev      eventInfo
+		curr      eventInfo
+		wantEvent string
 	}{
 		{"all off to mic only", eventInfo{}, eventInfo{micsInUse: 1}, eventMicOnlyOn},
 		{"all off to cam only", eventInfo{}, eventInfo{camerasInUse: 1}, eventCamOnlyOn},
@@ -179,7 +180,8 @@ func TestHookEnvBothOn(t *testing.T) {
 				ProductID: "082d",
 				Nodes:     []string{"/dev/video0"},
 				InUse:     true,
-				Users:     []camdet.Process{{PID: 1234, Name: "zoom", Node: "/dev/video0"}},
+				Streaming: true,
+				Users:     []camdet.Process{{PID: 1234, Name: "zoom", Node: "/dev/video0", Streaming: true}},
 			}},
 			FullVisibility: true,
 		},

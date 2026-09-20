@@ -31,10 +31,13 @@ type eventInfo struct {
 	micsInUse    int
 }
 
-// anyInUse reports whether any camera or microphone in the snapshot is currently in use.
+// anyInUse reports whether any camera is actively streaming or any microphone
+// is in use. A camera that is merely open (e.g. an app probing device
+// capabilities) is not "in use" for transition purposes — only active capture
+// (Streaming) counts, so probes do not fire the hook.
 func anyInUse(res *camdet.MicResult) bool {
 	for _, cam := range res.Cameras {
-		if cam.InUse {
+		if cam.Streaming {
 			return true
 		}
 	}
@@ -46,11 +49,11 @@ func anyInUse(res *camdet.MicResult) bool {
 	return false
 }
 
-// getEventInfo returns the count of in-use cameras and mics.
+// getEventInfo returns the count of actively-streaming cameras and in-use mics.
 func getEventInfo(res *camdet.MicResult) eventInfo {
 	var info eventInfo
 	for _, cam := range res.Cameras {
-		if cam.InUse {
+		if cam.Streaming {
 			info.camerasInUse++
 		}
 	}
@@ -99,7 +102,7 @@ func hookEnv(event string, res *camdet.MicResult, now time.Time) []string {
 	camCount := 0
 	micCount := 0
 	for _, cam := range res.Cameras {
-		if !cam.InUse {
+		if !cam.Streaming {
 			continue
 		}
 		camCount++
@@ -169,7 +172,7 @@ type transitionRecord struct {
 func logTransition(w io.Writer, event string, res *camdet.MicResult, now time.Time, asJSON bool) {
 	cams := inUseCameras(res)
 	mics := inUseMics(res)
-	
+
 	if asJSON {
 		enc := json.NewEncoder(w)
 		_ = enc.Encode(transitionRecord{
@@ -217,7 +220,7 @@ func logTransition(w io.Writer, event string, res *camdet.MicResult, now time.Ti
 func inUseCameras(res *camdet.MicResult) []camdet.Camera {
 	var cams []camdet.Camera
 	for _, cam := range res.Cameras {
-		if cam.InUse {
+		if cam.Streaming {
 			cams = append(cams, cam)
 		}
 	}
