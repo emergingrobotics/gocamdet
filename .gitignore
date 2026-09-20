@@ -1,1 +1,10 @@
 /bin/
+.env
+.envrc
+*~
+bin/
+.llm/
+vendor/
+
+# Build output
+/gocamdet

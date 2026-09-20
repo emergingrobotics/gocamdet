@@ -1,0 +1,52 @@
+#!/bin/sh
+# gocamdet transition hook.
+#
+# Invoked as:  hook.sh mic-only-on | hook.sh cam-only-on | hook.sh both-on | hook.sh off
+#
+# Available environment variables:
+#   CAMDET_EVENT           mic-only-on | cam-only-on | both-on | off
+#   CAMDET_TIMESTAMP       RFC3339 time of the transition
+#   CAMDET_CAMERAS_IN_USE  count of cameras currently in use
+#   CAMDET_CAMERA_NAMES    comma-separated model names (in-use cameras)
+#   CAMDET_CAMERA_IDS      comma-separated vendor:product ids
+#   CAMDET_USERS           comma-separated name(pid) of using processes
+#   CAMDET_MICS_IN_USE     count of mics currently in use
+#   CAMDET_MIC_NAMES       comma-separated device names (in-use mics)
+#   CAMDET_MIC_USERS       comma-separated name(pid) of using processes
+#
+# Controls a tally light bulb based on device state:
+#   - mic-only-on: bright blue (USB mic only)
+#   - cam-only-on: red (camera only)
+#   - both-on: red (camera + mic)
+#   - off: bulb off
+
+# LED device path - adjust to match your system
+# Common paths: /sys/class/leds/*/brightness, /sys/class/backlight/*/brightness
+LED_PATH="/sys/class/leds/led0/brightness"
+
+set_led() {
+    if [ -f "$LED_PATH" ]; then
+        echo "$1" > "$LED_PATH"
+    fi
+}
+
+case "$1" in
+  mic-only-on)
+    # Bright blue LED
+    logger -t gocamdet "mic-only ON at ${CAMDET_TIMESTAMP}: ${CAMDET_MIC_NAMES} used by ${CAMDET_MIC_USERS} - blue LED"
+    set_led 255
+    ;;
+  cam-only-on|both-on)
+    # Red LED
+    logger -t gocamdet "camera ON at ${CAMDET_TIMESTAMP}: ${CAMDET_CAMERA_NAMES} used by ${CAMDET_USERS}" - red LED
+    set_led 255
+    ;;
+  off)
+    logger -t gocamdet "device OFF at ${CAMDET_TIMESTAMP} - LED off"
+    set_led 0
+    ;;
+  *)
+    logger -t gocamdet "unknown event: $1"
+    exit 1
+    ;;
+esac

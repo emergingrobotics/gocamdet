@@ -136,9 +136,47 @@ code, no defensive swallowing):
   7. Two cameras, one in use → correct per-camera `InUse`; CLI exit code `1`.
 - All tests run via `make test`; no stubbed, skipped, or commented-out tests.
 
+## Watch mode (added 2026-09-10)
+
+Continuous monitoring, previously a non-goal, is now delivered via `--watch`.
+
+### Decisions
+
+| Decision | Choice |
+| --- | --- |
+| Detection | Poll `Detect()` on `--interval` (default 2s); no inotify/udev, keeps zero deps |
+| Granularity | Aggregate: fire when going from zero-in-use to any-in-use, and back |
+| Startup | Fire-on-startup: emit the current state's event immediately, then on edges |
+| Hook | Single `--script`, invoked as `script on` / `script off`; details via env |
+| Hook safety | Bounded by `--script-timeout` (default 30s); a failing/slow hook is logged, never fatal |
+| Shutdown | `SIGINT`/`SIGTERM` → clean exit 0; a `Detect()` error → exit 2 |
+| Output | Human transition lines by default; one JSON object per transition with `--json` |
+| Deployment | Example system-level `systemd` unit runs as root (full visibility) at boot |
+
+### Hook environment
+
+`CAMDET_EVENT` (on/off), `CAMDET_TIMESTAMP` (RFC3339), `CAMDET_CAMERAS_IN_USE`
+(count), `CAMDET_CAMERA_NAMES`, `CAMDET_CAMERA_IDS` (`vendor:product`),
+`CAMDET_USERS` (`name(pid)`). Per-camera lists describe only in-use cameras, so
+they are empty for an `off` event.
+
+### Structure and testing
+
+Watch logic lives entirely in `cmd/gocamdet/watch.go`; the `camdet` library
+package is untouched and reused via the public `Detect()`. The loop is a
+`watcher` whose `detect` function and per-transition `onEvent` callback are
+injected, so `run(ctx, tick)` is driven deterministically in tests with
+synthetic `Result`s over a caller-controlled tick channel — no hardware, no
+root, no real sleeping. The hook process runs in its own process group and is
+killed group-wide on timeout so a child (e.g. `sleep`) cannot hold the output
+pipe open. Tests in `cmd/gocamdet/watch_test.go` cover: aggregate state,
+event mapping, env construction, fire-on-startup + edge-only firing, a fatal
+startup detect error, and hook arg/env delivery, timeout, and non-zero exit.
+
 ## Build
 
-- `Makefile` with at least: `build`, `test`, `vet`, `lint`, `clean`.
+- `Makefile` with at least: `build`, `test`, `run-tests`, `vet`, `lint`,
+  `install`, `clean`; bare `make` prints the target list.
 - No network or external tool dependencies at build or run time.
 
 ## Open items for the plan

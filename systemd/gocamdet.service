@@ -1,0 +1,19 @@
+[Unit]
+Description=gocamdet — watch USB camera in-use state and run a hook on transitions
+Documentation=https://github.com/gherlein/gocamdet
+After=multi-user.target
+
+[Service]
+Type=simple
+# Runs as root so process attribution is complete (full visibility).
+ExecStart=/usr/local/bin/gocamdet --watch --interval 2s --script /home/gherlein/bin/lights-meeting.sh
+Restart=on-failure
+RestartSec=5
+# gocamdet reads only sysfs/procfs and executes the configured hook.
+# ProtectHome is read-only (not true) so the hook script under /home stays reachable.
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

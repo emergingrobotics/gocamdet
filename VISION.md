@@ -38,6 +38,9 @@ small, well-defined Go API and a scriptable CLI.
 2. **An example CLI** (`cmd/gocamdet`) that prints a human-readable snapshot by
    default, supports `--json` for machine consumption, and sets a scriptable
    exit code (`0` = none in use, `1` = at least one in use, `2` = error).
+3. **A continuous watch mode** (`--watch`) that polls on an interval and runs a
+   hook script on aggregate on/off transitions (any camera in use vs. none),
+   plus an example systemd unit to run it at boot.
 
 ## Design principles
 
@@ -60,7 +63,10 @@ small, well-defined Go API and a scriptable CLI.
 - No live streaming/frame-level state detection.
 - No control of the camera (start/stop/kill the using process).
 - No macOS/Windows implementation (yet).
-- No `--watch`/continuous monitoring mode in the first version.
+- No event-based (inotify/fanotify/udev) detection; watch mode polls, keeping
+  the zero-dependency, pure-Go design.
+- No per-camera transition granularity; watch mode reports the aggregate
+  any-camera-in-use state.
 - No use of external tools (`lsof`, `fuser`, `v4l2-ctl`) at runtime.
 
 ## Success criteria

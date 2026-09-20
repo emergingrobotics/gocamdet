@@ -194,7 +194,10 @@ flowchart LR
 
 Recommended logic:
 
-1. **Camera:** reuse `gocamdet` — a process holds a `/dev/videoN` node open.
+1. **Camera:** reuse `gocamdet` — a process holds a `/dev/videoN` node open. For
+   a long-running presence detector, `gocamdet --watch` already polls and emits
+   on/off transitions (and can run a hook or a systemd service); the mic check
+   below can be layered onto the same cadence.
 2. **Mic:** at least one `Stream/Input/Audio` node is `running` in PipeWire.
 3. **Meeting = camera AND mic.**
 
