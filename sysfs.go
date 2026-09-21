@@ -4,7 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+)
+
+// USB Video Class interface identifiers. A UVC camera exposes a VideoControl
+// interface (subclass 01) and one or more VideoStreaming interfaces (subclass
+// 02); only the latter's alternate setting reflects active capture.
+const (
+	usbVideoClass             = "0e"
+	usbVideoStreamingSubclass = "02"
 )
 
 // nodeInfo is a single /dev/videoN node that has been confirmed to belong to a
@@ -64,6 +73,42 @@ func enumerate(root string) ([]nodeInfo, error) {
 	}
 
 	return nodes, nil
+}
+
+// streamingUSB reports whether the USB device rooted at usbDir is actively
+// capturing video. A UVC camera's VideoStreaming interface selects a non-zero
+// alternate setting to allocate isochronous bandwidth only while streaming;
+// merely opening the device or reading its controls leaves it at alternate
+// setting 0. This transport-level signal is independent of how a client maps
+// buffers (mmap, DMABUF, userptr, or read()), so it detects capture routed
+// through pipewire and the xdg camera portal as well as direct V4L2 clients —
+// unlike inspecting /proc/<pid>/maps, which only sees V4L2_MEMORY_MMAP clients.
+//
+// Cameras that stream over bulk endpoints expose a single alternate setting and
+// never change this value; for those this reports false and callers fall back
+// to open-fd state. A missing or unreadable attribute is treated as not
+// streaming.
+func streamingUSB(usbDir string) bool {
+	entries, err := os.ReadDir(usbDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		ifaceDir := filepath.Join(usbDir, entry.Name())
+		if readAttr(ifaceDir, "bInterfaceClass") != usbVideoClass {
+			continue
+		}
+		if readAttr(ifaceDir, "bInterfaceSubClass") != usbVideoStreamingSubclass {
+			continue
+		}
+		if alt, err := strconv.Atoi(readAttr(ifaceDir, "bAlternateSetting")); err == nil && alt != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // findUSBDeviceDir walks up from a V4L2 device directory looking for the nearest

@@ -1,7 +1,6 @@
 package camdet
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -79,14 +78,18 @@ func (f *fixture) addProcessUsing(pid int, comm, devNode string) {
 	}
 }
 
-// addStreamingProcess creates a /proc/<pid> entry that both holds devNode open
-// and has it memory-mapped, simulating an active V4L2 capture (which mmaps its
-// buffers from the device fd).
-func (f *fixture) addStreamingProcess(pid int, comm, devNode string) {
+// setStreaming creates a USB VideoStreaming interface (class 0e, subclass 02)
+// on the given camera's device directory with the given alternate setting. A
+// non-zero alt setting is how the kernel reflects active isochronous capture,
+// regardless of which process (or pipewire) is draining frames.
+func (f *fixture) setStreaming(deviceKey string, alt int) {
 	f.t.Helper()
-	f.addProcessUsing(pid, comm, devNode)
-	line := fmt.Sprintf("7f0000000000-7f0000001000 rw-s 00000000 00:06 1145 %s\n", devNode)
-	mustWrite(f.t, filepath.Join(f.root, "proc", strconv.Itoa(pid), "maps"), line)
+	usbDir := filepath.Join(f.root, "sys", "devices", "usbtree", deviceKey)
+	ifaceDir := filepath.Join(usbDir, deviceKey+":1.1")
+	mustMkdir(f.t, ifaceDir)
+	mustWrite(f.t, filepath.Join(ifaceDir, "bInterfaceClass"), "0e\n")
+	mustWrite(f.t, filepath.Join(ifaceDir, "bInterfaceSubClass"), "02\n")
+	mustWrite(f.t, filepath.Join(ifaceDir, "bAlternateSetting"), strconv.Itoa(alt)+"\n")
 }
 
 // addUnreadableProcess creates a /proc/<pid>/fd directory that cannot be read,
@@ -271,15 +274,17 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 }
 
-// A camera is Streaming only when a process has a node memory-mapped (active
-// capture). A process that merely holds the fd open (a probe) is InUse but not
-// Streaming — this is the distinction that keeps browser device-enumeration from
-// counting as "in use".
-func TestStreamingVsOpen(t *testing.T) {
+// A camera is Streaming when its USB VideoStreaming interface has selected a
+// non-zero alternate setting (active isochronous capture). This is independent
+// of how the holder maps buffers, so it detects capture even when the only
+// open handle belongs to pipewire, which drains frames via DMABUF and never
+// memory-maps the device node. This is the regression case that the earlier
+// /proc/<pid>/maps heuristic missed.
+func TestStreamingViaPipewire(t *testing.T) {
 	f := newFixture(t)
 	f.addUSBCamera("1-2", "046d", "082d", "Brio", "", "video0")
-	f.addStreamingProcess(4321, "ffmpeg", "/dev/video0") // fd + mmap = streaming
-	f.addProcessUsing(9876, "chrome", "/dev/video0")     // fd only = probe
+	f.setStreaming("1-2", 11)                          // isochronous bandwidth allocated
+	f.addProcessUsing(1592, "pipewire", "/dev/video0") // fd open, no mmap
 
 	res, err := detect(f.root)
 	if err != nil {
@@ -290,27 +295,21 @@ func TestStreamingVsOpen(t *testing.T) {
 	}
 	cam := res.Cameras[0]
 	if !cam.InUse {
-		t.Fatal("camera should be InUse (fds are open)")
+		t.Fatal("camera should be InUse (pipewire holds the fd open)")
 	}
 	if !cam.Streaming {
-		t.Fatal("camera should be Streaming (ffmpeg has it mmap'd)")
-	}
-	streamingByName := map[string]bool{}
-	for _, u := range cam.Users {
-		streamingByName[u.Name] = u.Streaming
-	}
-	if !streamingByName["ffmpeg"] {
-		t.Fatal("ffmpeg should be marked streaming")
-	}
-	if streamingByName["chrome"] {
-		t.Fatal("chrome (probe, no mmap) must not be marked streaming")
+		t.Fatal("camera should be Streaming (VideoStreaming interface alt != 0)")
 	}
 }
 
-func TestOpenOnlyIsNotStreaming(t *testing.T) {
+// A camera whose VideoStreaming interface is at alternate setting 0 is not
+// capturing, even while a process holds a node open (e.g. an app probing device
+// capabilities). InUse is true; Streaming is false.
+func TestOpenButNotStreaming(t *testing.T) {
 	f := newFixture(t)
 	f.addUSBCamera("1-2", "046d", "082d", "Brio", "", "video0")
-	f.addProcessUsing(5555, "chrome", "/dev/video0") // only opens, never mmaps
+	f.setStreaming("1-2", 0)                         // interface present, idle
+	f.addProcessUsing(5555, "chrome", "/dev/video0") // opens to probe, does not stream
 
 	res, err := detect(f.root)
 	if err != nil {
@@ -321,6 +320,22 @@ func TestOpenOnlyIsNotStreaming(t *testing.T) {
 		t.Fatal("open fd should count as InUse")
 	}
 	if cam.Streaming {
-		t.Fatal("an open-only camera must not be Streaming")
+		t.Fatal("a camera at alternate setting 0 must not be Streaming")
+	}
+}
+
+// A camera with no VideoStreaming interface at all (or an unreadable one) must
+// degrade gracefully to not-streaming rather than error.
+func TestNoStreamingInterfaceIsNotStreaming(t *testing.T) {
+	f := newFixture(t)
+	f.addUSBCamera("1-2", "046d", "082d", "Brio", "", "video0")
+	f.addProcessUsing(5555, "chrome", "/dev/video0")
+
+	res, err := detect(f.root)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if res.Cameras[0].Streaming {
+		t.Fatal("camera with no VideoStreaming interface must not be Streaming")
 	}
 }

@@ -21,7 +21,7 @@ type Camera struct {
 	Serial    string    `json:"serial"`    // may be empty if not exposed
 	Nodes     []string  `json:"nodes"`     // e.g. ["/dev/video0", "/dev/video1"]
 	InUse     bool      `json:"inUse"`     // true if any node is held open by a process (open != streaming)
-	Streaming bool      `json:"streaming"` // true if any process is actively capturing (has a node mmap'd)
+	Streaming bool      `json:"streaming"` // true if the USB VideoStreaming interface is actively capturing
 	Users     []Process `json:"users"`     // processes holding a node open; may be partial
 }
 
@@ -30,10 +30,6 @@ type Process struct {
 	PID  int    `json:"pid"`
 	Name string `json:"name"` // from /proc/<pid>/comm
 	Node string `json:"node"` // which /dev/videoN this process has open
-	// Streaming is true when this process has the node memory-mapped, which a
-	// V4L2 capture does (VIDIOC_REQBUFS + mmap) but merely opening or probing
-	// the device does not. It distinguishes active capture from an open fd.
-	Streaming bool `json:"streaming"`
 }
 
 // Result is a full detection snapshot.
@@ -87,12 +83,13 @@ func detect(root string) (*Result, error) {
 	// Attribute open handles to their owning camera.
 	for _, cam := range byUSB {
 		sort.Strings(cam.Nodes)
+		// Streaming is a property of the physical device (its USB VideoStreaming
+		// interface), not of any single holder, so it is derived from sysfs
+		// rather than from the open handles.
+		cam.Streaming = streamingUSB(cam.USBPath)
 		for _, node := range cam.Nodes {
 			for _, proc := range openByNode[node] {
 				cam.InUse = true
-				if proc.Streaming {
-					cam.Streaming = true
-				}
 				cam.Users = append(cam.Users, proc)
 			}
 		}
