@@ -65,32 +65,36 @@ func getEventInfo(res *camdet.MicResult) eventInfo {
 	return info
 }
 
-// eventFor maps the current and previous in-use state to its hook event name.
-// prevInfo and currInfo are the previous and current camera/mic state.
+// stateEvent classifies a camera/mic snapshot into the hook event that
+// describes it. The event name doubles as the state's identity, so a transition
+// is detected by comparing the events of two snapshots.
+func stateEvent(info eventInfo) string {
+	switch {
+	case info.camerasInUse > 0 && info.micsInUse > 0:
+		return eventBothOn
+	case info.camerasInUse > 0:
+		return eventCamOnlyOn
+	case info.micsInUse > 0:
+		return eventMicOnlyOn
+	default:
+		return eventOff
+	}
+}
+
+// eventFor maps a transition between the previous and current in-use state to
+// its hook event name, or "" when the state is unchanged. Every change of state
+// fires — including transitions between "on" sub-states such as mic-only to
+// both (the camera starting after the mic) — because the hook drives a status
+// light that must reflect the current devices at all times. Suppressing those
+// transitions would strand the light on a stale state, e.g. mic-only blue while
+// the camera is streaming.
 func eventFor(prevInfo, currInfo eventInfo) string {
-	// If we're going from all off to some on, determine which type
-	if prevInfo.camerasInUse == 0 && prevInfo.micsInUse == 0 {
-		if currInfo.camerasInUse > 0 && currInfo.micsInUse > 0 {
-			return eventBothOn
-		}
-		if currInfo.camerasInUse > 0 {
-			return eventCamOnlyOn
-		}
-		if currInfo.micsInUse > 0 {
-			return eventMicOnlyOn
-		}
+	prev := stateEvent(prevInfo)
+	curr := stateEvent(currInfo)
+	if prev == curr {
+		return ""
 	}
-
-	// If we're going from some on to all off
-	if prevInfo.camerasInUse > 0 || prevInfo.micsInUse > 0 {
-		if currInfo.camerasInUse == 0 && currInfo.micsInUse == 0 {
-			return eventOff
-		}
-	}
-
-	// No transition (same state) or partial transition within "on" state
-	// Don't fire for transitions within "on" state (e.g., cam-only to both)
-	return ""
+	return curr
 }
 
 // hookEnv builds the environment variables handed to the hook script. The

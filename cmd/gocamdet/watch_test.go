@@ -95,8 +95,18 @@ func TestEventFor(t *testing.T) {
 		{"mic only to all off", eventInfo{micsInUse: 1}, eventInfo{}, eventOff},
 		{"cam only to all off", eventInfo{camerasInUse: 1}, eventInfo{}, eventOff},
 		{"both to all off", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{}, eventOff},
-		{"cam only to both (no transition)", eventInfo{camerasInUse: 1}, eventInfo{camerasInUse: 1, micsInUse: 1}, ""},
-		{"both to cam only (no transition)", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{camerasInUse: 1}, ""},
+		// Transitions between "on" sub-states must fire so the light always
+		// reflects the current devices. The mic-only -> both case is the common
+		// meeting sequence (mic opens first, camera a beat later); it must turn
+		// the light red rather than leaving it stuck on mic-only blue.
+		{"mic only to both", eventInfo{micsInUse: 1}, eventInfo{camerasInUse: 1, micsInUse: 1}, eventBothOn},
+		{"both to mic only", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{micsInUse: 1}, eventMicOnlyOn},
+		{"cam only to both", eventInfo{camerasInUse: 1}, eventInfo{camerasInUse: 1, micsInUse: 1}, eventBothOn},
+		{"both to cam only", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{camerasInUse: 1}, eventCamOnlyOn},
+		{"mic only to cam only", eventInfo{micsInUse: 1}, eventInfo{camerasInUse: 1}, eventCamOnlyOn},
+		{"cam only to mic only", eventInfo{camerasInUse: 1}, eventInfo{micsInUse: 1}, eventMicOnlyOn},
+		{"mic only to mic only", eventInfo{micsInUse: 1}, eventInfo{micsInUse: 1}, ""},
+		{"both to both", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{camerasInUse: 1, micsInUse: 1}, ""},
 		{"all off to all off", eventInfo{}, eventInfo{}, ""},
 	}
 
@@ -273,6 +283,82 @@ func TestWatchFiresOnStartupThenOnEdges(t *testing.T) {
 	}
 
 	want := []string{"cam-only-on", "off"} // cam-only-on on startup, then off
+	if strings.Join(events, ",") != strings.Join(want, ",") {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+}
+
+// micOnlyResult is a snapshot with a mic in use but no camera streaming — the
+// state at the instant a meeting opens the microphone before the camera has
+// finished negotiating capture.
+func micOnlyResult() *camdet.MicResult {
+	return &camdet.MicResult{
+		Result: &camdet.Result{
+			Cameras: []camdet.Camera{{
+				Name:      "HD Pro Webcam C920",
+				VendorID:  "046d",
+				ProductID: "082d",
+				Nodes:     []string{"/dev/video0"},
+				InUse:     false,
+			}},
+			FullVisibility: true,
+		},
+		Mics: []camdet.Mic{{
+			Name:   "Blue Yeti",
+			Device: "blueyeti",
+			InUse:  true,
+			Users:  []camdet.User{{PID: 5678, Name: "chrome"}},
+		}},
+	}
+}
+
+// bothResult is a snapshot with the mic in use and the camera streaming.
+func bothResult() *camdet.MicResult {
+	res := inUseResult()
+	res.Mics = []camdet.Mic{{
+		Name:   "Blue Yeti",
+		Device: "blueyeti",
+		InUse:  true,
+		Users:  []camdet.User{{PID: 5678, Name: "chrome"}},
+	}}
+	return res
+}
+
+// TestWatchMicThenCameraFiresBothOn is the regression guard for the reported
+// bug: the mic goes active first (light blue), then the camera starts streaming
+// while the mic is still on. The watcher must fire both-on so the light turns
+// red, rather than staying on the earlier mic-only-on.
+func TestWatchMicThenCameraFiresBothOn(t *testing.T) {
+	results := []*camdet.MicResult{micOnlyResult(), bothResult(), idleResult()}
+	index := 0
+	detect := func() (*camdet.MicResult, error) {
+		r := results[index]
+		index++
+		return r, nil
+	}
+
+	var events []string
+	w := &watcher{
+		detect: detect,
+		onEvent: func(_ context.Context, event string, _ *camdet.MicResult) {
+			events = append(events, event)
+		},
+	}
+
+	tick := make(chan time.Time)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.run(ctx, tick) }()
+
+	tick <- time.Now() // mic-only (0/1) -> both (1/1): fires both-on
+	tick <- time.Now() // both (1/1) -> idle (0/0): fires off
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	// mic-only-on on startup, both-on when the camera comes up, off at the end.
+	want := []string{"mic-only-on", "both-on", "off"}
 	if strings.Join(events, ",") != strings.Join(want, ",") {
 		t.Fatalf("events = %v, want %v", events, want)
 	}
