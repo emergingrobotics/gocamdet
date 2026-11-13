@@ -52,88 +52,88 @@ func hasPipeWire() bool {
 // detectMicPipeWire queries PipeWire for active audio capture streams.
 // It returns mic state and users, or an error if pw-dump fails.
 func detectMicPipeWire() ([]Mic, error) {
-    // Query PipeWire for running audio capture nodes.
-    // Return a slice of Mic, each representing a distinct device (source) that
-    // is currently in use. For Stream/Input/Audio nodes we also attach the
-    // capturing process as a user. Audio/Source nodes represent the underlying
-    // hardware microphone; they may have no associated user if only the device
-    // node is present.
-    cmd := exec.Command("pw-dump")
-    output, err := cmd.Output()
-    if err != nil {
-        return nil, fmt.Errorf("pw-dump failed: %w", err)
-    }
+	// Query PipeWire for running audio capture nodes.
+	// Return a slice of Mic, each representing a distinct device (source) that
+	// is currently in use. For Stream/Input/Audio nodes we also attach the
+	// capturing process as a user. Audio/Source nodes represent the underlying
+	// hardware microphone; they may have no associated user if only the device
+	// node is present.
+	cmd := exec.Command("pw-dump")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("pw-dump failed: %w", err)
+	}
 
-    type Props struct {
-        MediaClass       string `json:"media.class"`
-        NodeName         string `json:"node.name"`
-        AppProcessID     int    `json:"application.process.id"`
-        AppProcessBinary string `json:"application.process.binary"`
-        DeviceAPI        string `json:"device.api"`
-    }
-    type Info struct {
-        State string `json:"state"`
-        Props Props  `json:"props"`
-    }
-    type Node struct {
-        Type string `json:"type"`
-        Info Info   `json:"info"`
-    }
+	type Props struct {
+		MediaClass       string `json:"media.class"`
+		NodeName         string `json:"node.name"`
+		AppProcessID     int    `json:"application.process.id"`
+		AppProcessBinary string `json:"application.process.binary"`
+		DeviceAPI        string `json:"device.api"`
+	}
+	type Info struct {
+		State string `json:"state"`
+		Props Props  `json:"props"`
+	}
+	type Node struct {
+		Type string `json:"type"`
+		Info Info   `json:"info"`
+	}
 
-    var nodes []Node
-    if err := json.Unmarshal(output, &nodes); err != nil {
-        return nil, fmt.Errorf("parsing pw-dump JSON: %w", err)
-    }
+	var nodes []Node
+	if err := json.Unmarshal(output, &nodes); err != nil {
+		return nil, fmt.Errorf("parsing pw-dump JSON: %w", err)
+	}
 
-    // Map from node name (device identifier) to Mic index.
-    micMap := make(map[string]int)
-    var mics []Mic
+	// Map from node name (device identifier) to Mic index.
+	micMap := make(map[string]int)
+	var mics []Mic
 
-    for _, n := range nodes {
-        if n.Type != "PipeWire:Interface:Node" {
-            continue
-        }
-        if n.Info.State != "running" {
-            continue
-        }
-        mc := n.Info.Props.MediaClass
-        // Handle application capture streams.
-        if mc == "Stream/Input/Audio" {
-            // Create or update mic entry for the device name.
-            name := n.Info.Props.NodeName
-            idx, ok := micMap[name]
-            if !ok {
-                mics = append(mics, Mic{
-                    Name:    name,
-                    Device:  name,
-                    InUse:   true,
-                    Backend: "pipewire",
-                })
-                idx = len(mics) - 1
-                micMap[name] = idx
-            }
-            // Attach user.
-            if n.Info.Props.AppProcessID > 0 {
-                mics[idx].Users = append(mics[idx].Users, User{PID: n.Info.Props.AppProcessID, Name: n.Info.Props.AppProcessBinary})
-            }
-            // Ensure InUse flag.
-            mics[idx].InUse = true
-        } else if mc == "Audio/Source" {
-            // Hardware source device, may be Bluetooth (bluez5) or regular.
-            name := n.Info.Props.NodeName
-            if _, exists := micMap[name]; !exists {
-                mics = append(mics, Mic{
-                    Name:    name,
-                    Device:  name,
-                    InUse:   true,
-                    Backend: "pipewire",
-                })
-                micMap[name] = len(mics) - 1
-            }
-        }
-    }
+	for _, n := range nodes {
+		if n.Type != "PipeWire:Interface:Node" {
+			continue
+		}
+		if n.Info.State != "running" {
+			continue
+		}
+		mc := n.Info.Props.MediaClass
+		// Handle application capture streams.
+		if mc == "Stream/Input/Audio" {
+			// Create or update mic entry for the device name.
+			name := n.Info.Props.NodeName
+			idx, ok := micMap[name]
+			if !ok {
+				mics = append(mics, Mic{
+					Name:    name,
+					Device:  name,
+					InUse:   true,
+					Backend: "pipewire",
+				})
+				idx = len(mics) - 1
+				micMap[name] = idx
+			}
+			// Attach user.
+			if n.Info.Props.AppProcessID > 0 {
+				mics[idx].Users = append(mics[idx].Users, User{PID: n.Info.Props.AppProcessID, Name: n.Info.Props.AppProcessBinary})
+			}
+			// Ensure InUse flag.
+			mics[idx].InUse = true
+		} else if mc == "Audio/Source" {
+			// Hardware source device, may be Bluetooth (bluez5) or regular.
+			name := n.Info.Props.NodeName
+			if _, exists := micMap[name]; !exists {
+				mics = append(mics, Mic{
+					Name:    name,
+					Device:  name,
+					InUse:   true,
+					Backend: "pipewire",
+				})
+				micMap[name] = len(mics) - 1
+			}
+		}
+	}
 
-    return mics, nil
+	return mics, nil
 }
 
 // detectMicALSA scans ALSA capture devices via /proc/asound.

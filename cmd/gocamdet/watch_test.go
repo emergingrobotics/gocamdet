@@ -68,58 +68,6 @@ func TestAnyInUse(t *testing.T) {
 	}
 }
 
-func TestGetEventInfo(t *testing.T) {
-	idle := idleResult()
-	info := getEventInfo(idle)
-	if info.camerasInUse != 0 || info.micsInUse != 0 {
-		t.Fatalf("idle result should have 0 cameras and 0 mics, got %+v", info)
-	}
-
-	inUse := inUseResult()
-	info = getEventInfo(inUse)
-	if info.camerasInUse != 1 || info.micsInUse != 0 {
-		t.Fatalf("in-use result should have 1 camera and 0 mics, got %+v", info)
-	}
-}
-
-func TestEventFor(t *testing.T) {
-	tests := []struct {
-		name      string
-		prev      eventInfo
-		curr      eventInfo
-		wantEvent string
-	}{
-		{"all off to mic only", eventInfo{}, eventInfo{micsInUse: 1}, eventMicOnlyOn},
-		{"all off to cam only", eventInfo{}, eventInfo{camerasInUse: 1}, eventCamOnlyOn},
-		{"all off to both", eventInfo{}, eventInfo{camerasInUse: 1, micsInUse: 1}, eventBothOn},
-		{"mic only to all off", eventInfo{micsInUse: 1}, eventInfo{}, eventOff},
-		{"cam only to all off", eventInfo{camerasInUse: 1}, eventInfo{}, eventOff},
-		{"both to all off", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{}, eventOff},
-		// Transitions between "on" sub-states must fire so the light always
-		// reflects the current devices. The mic-only -> both case is the common
-		// meeting sequence (mic opens first, camera a beat later); it must turn
-		// the light red rather than leaving it stuck on mic-only blue.
-		{"mic only to both", eventInfo{micsInUse: 1}, eventInfo{camerasInUse: 1, micsInUse: 1}, eventBothOn},
-		{"both to mic only", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{micsInUse: 1}, eventMicOnlyOn},
-		{"cam only to both", eventInfo{camerasInUse: 1}, eventInfo{camerasInUse: 1, micsInUse: 1}, eventBothOn},
-		{"both to cam only", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{camerasInUse: 1}, eventCamOnlyOn},
-		{"mic only to cam only", eventInfo{micsInUse: 1}, eventInfo{camerasInUse: 1}, eventCamOnlyOn},
-		{"cam only to mic only", eventInfo{camerasInUse: 1}, eventInfo{micsInUse: 1}, eventMicOnlyOn},
-		{"mic only to mic only", eventInfo{micsInUse: 1}, eventInfo{micsInUse: 1}, ""},
-		{"both to both", eventInfo{camerasInUse: 1, micsInUse: 1}, eventInfo{camerasInUse: 1, micsInUse: 1}, ""},
-		{"all off to all off", eventInfo{}, eventInfo{}, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := eventFor(tt.prev, tt.curr)
-			if got != tt.wantEvent {
-				t.Fatalf("eventFor(prev=%+v, curr=%+v) = %q, want %q", tt.prev, tt.curr, got, tt.wantEvent)
-			}
-		})
-	}
-}
-
 func TestHookEnvMicOnlyOn(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	// Create a result with only mic in use

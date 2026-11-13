@@ -17,84 +17,21 @@ import (
 )
 
 // Hook events. The hook script receives one of these as its first argument and
-// as CAMDET_EVENT.
+// as CAMDET_EVENT. The strings are sourced from the camdet library so the
+// four-state model has a single source of truth (see camdet.AggregateState).
 const (
-	eventMicOnlyOn = "mic-only-on"
-	eventCamOnlyOn = "cam-only-on"
-	eventBothOn    = "both-on"
-	eventOff       = "off"
+	eventMicOnlyOn = string(camdet.StateMicOnlyOn)
+	eventCamOnlyOn = string(camdet.StateCamOnlyOn)
+	eventBothOn    = string(camdet.StateBothOn)
+	eventOff       = string(camdet.StateOff)
 )
-
-// eventInfo tracks camera and mic in-use state.
-type eventInfo struct {
-	camerasInUse int
-	micsInUse    int
-}
 
 // anyInUse reports whether any camera is actively streaming or any microphone
 // is in use. A camera that is merely open (e.g. an app probing device
 // capabilities) is not "in use" for transition purposes — only active capture
 // (Streaming) counts, so probes do not fire the hook.
 func anyInUse(res *camdet.MicResult) bool {
-	for _, cam := range res.Cameras {
-		if cam.Streaming {
-			return true
-		}
-	}
-	for _, mic := range res.Mics {
-		if mic.InUse {
-			return true
-		}
-	}
-	return false
-}
-
-// getEventInfo returns the count of actively-streaming cameras and in-use mics.
-func getEventInfo(res *camdet.MicResult) eventInfo {
-	var info eventInfo
-	for _, cam := range res.Cameras {
-		if cam.Streaming {
-			info.camerasInUse++
-		}
-	}
-	for _, mic := range res.Mics {
-		if mic.InUse {
-			info.micsInUse++
-		}
-	}
-	return info
-}
-
-// stateEvent classifies a camera/mic snapshot into the hook event that
-// describes it. The event name doubles as the state's identity, so a transition
-// is detected by comparing the events of two snapshots.
-func stateEvent(info eventInfo) string {
-	switch {
-	case info.camerasInUse > 0 && info.micsInUse > 0:
-		return eventBothOn
-	case info.camerasInUse > 0:
-		return eventCamOnlyOn
-	case info.micsInUse > 0:
-		return eventMicOnlyOn
-	default:
-		return eventOff
-	}
-}
-
-// eventFor maps a transition between the previous and current in-use state to
-// its hook event name, or "" when the state is unchanged. Every change of state
-// fires — including transitions between "on" sub-states such as mic-only to
-// both (the camera starting after the mic) — because the hook drives a status
-// light that must reflect the current devices at all times. Suppressing those
-// transitions would strand the light on a stale state, e.g. mic-only blue while
-// the camera is streaming.
-func eventFor(prevInfo, currInfo eventInfo) string {
-	prev := stateEvent(prevInfo)
-	curr := stateEvent(currInfo)
-	if prev == curr {
-		return ""
-	}
-	return curr
+	return camdet.AggregateState(res) != camdet.StateOff
 }
 
 // hookEnv builds the environment variables handed to the hook script. The
@@ -296,10 +233,11 @@ func (w *watcher) run(ctx context.Context, tick <-chan time.Time) error {
 	if err != nil {
 		return err
 	}
-	prevInfo := getEventInfo(res)
-	event := eventFor(eventInfo{}, prevInfo)
-	if event != "" {
-		w.onEvent(ctx, event, res)
+	// Fire-on-startup: emit the current state immediately unless it is "off", so
+	// a watcher started while a camera is already streaming reports it.
+	prev := camdet.AggregateState(res)
+	if prev != camdet.StateOff {
+		w.onEvent(ctx, string(prev), res)
 	}
 
 	for {
@@ -311,10 +249,14 @@ func (w *watcher) run(ctx context.Context, tick <-chan time.Time) error {
 			if err != nil {
 				return err
 			}
-			currInfo := getEventInfo(res)
-			if event := eventFor(prevInfo, currInfo); event != "" {
-				prevInfo = currInfo
-				w.onEvent(ctx, event, res)
+			// Every state change fires — including transitions between "on"
+			// sub-states (e.g. mic-only to both) — so a hook driving a status
+			// light always reflects the current devices and is never stranded on
+			// a stale state.
+			curr := camdet.AggregateState(res)
+			if curr != prev {
+				prev = curr
+				w.onEvent(ctx, string(curr), res)
 			}
 		}
 	}
