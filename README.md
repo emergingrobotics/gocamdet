@@ -59,7 +59,7 @@ server) to answer *"is my webcam or mic on, and who turned it on?"*:
 
 It ships three things:
 
-1. A **Go library** (`github.com/gherlein/gocamdet`, package `camdet`) exposing
+1. A **Go library** (`github.com/emergingrobotics/gocamdet`, package `camdet`) exposing
    `Detect()` for cameras and `DetectWithMic()` for cameras plus microphones.
 2. A **CLI** (`cmd/gocamdet`) with human-readable and JSON output and
    scriptable exit codes.
@@ -222,7 +222,7 @@ distinction is a camera property.
 With the Go toolchain:
 
 ```sh
-go install github.com/gherlein/gocamdet/cmd/gocamdet@latest
+go install github.com/emergingrobotics/gocamdet/cmd/gocamdet@latest
 ```
 
 Or build from source:
@@ -489,7 +489,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/gherlein/gocamdet"
+	"github.com/emergingrobotics/gocamdet"
 )
 
 func main() {
@@ -520,7 +520,7 @@ For cameras only, call `camdet.Detect()` and use the returned `*Result`.
 
 ### API reference
 
-The package name is `camdet` (import path `github.com/gherlein/gocamdet`).
+The package name is `camdet` (import path `github.com/emergingrobotics/gocamdet`).
 
 ```go
 // Detect scans cameras only and returns the current snapshot of USB cameras.

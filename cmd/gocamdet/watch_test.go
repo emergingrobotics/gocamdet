@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gherlein/gocamdet"
+	"github.com/emergingrobotics/gocamdet"
 )
 
 func idleResult() *camdet.MicResult {

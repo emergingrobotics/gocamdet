@@ -19,7 +19,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/gherlein/gocamdet"
+	"github.com/emergingrobotics/gocamdet"
 )
 
 const (

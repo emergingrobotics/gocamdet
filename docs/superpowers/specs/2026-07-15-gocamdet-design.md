@@ -25,7 +25,7 @@ it. See `VISION.md` for scope and non-goals.
 
 ```
 gocamdet/
-  go.mod                      module github.com/gherlein/gocamdet
+  go.mod                      module github.com/emergingrobotics/gocamdet
   camdet.go                   public API (types + Detect())
   sysfs.go                    enumerate + USB filter + grouping
   procscan.go                 /proc/*/fd open-handle scanning

@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gherlein/gocamdet"
+	"github.com/emergingrobotics/gocamdet"
 )
 
 // Hook events. The hook script receives one of these as its first argument and
